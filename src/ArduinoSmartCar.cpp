@@ -47,7 +47,6 @@ void handleControl();
 // void handleDirection();
 void sendSerial();
 void serialControl();
-void controlUltraSonicSensor();
 void measureDistance();
 void readLineFollowerSensor();
 
@@ -68,7 +67,6 @@ Task tDrive(0, TASK_FOREVER, &handleManualMode, &taskManager, true);    // handl
 
 // sensor and calculations
 Task tDistance(updateInterval, TASK_FOREVER, &measureDistance, &taskManager, true);                        // ultrasonic distance sensor
-Task tUltraSonicSensor(updateInterval + 20, TASK_FOREVER, &controlUltraSonicSensor, &taskManager, false);  // scanning movement of ultrasonic sensor
 Task tLineFollowerSensor(updateInterval + 20, TASK_FOREVER, &readLineFollowerSensor, &taskManager, false); // line follower sensor
 // Task tPID
 
@@ -328,31 +326,6 @@ void readLineFollowerSensor()
     Serial.println("Postition: " + lineFollowerPosition);
 }
 
-void controlUltraSonicSensor()
-{
-    // if (currentAngle > 135)
-    // {
-    //     currentAngle = 135;
-    //     nextStep = -5;
-    // }
-
-    // if(currentAngle < 45)
-    // {
-    //     currentAngle = 45;
-    //     nextStep = 5;
-    // }
-
-    // currentAngle += nextStep;
-
-    // // set next step
-    // ultrasonicServo.write(currentAngle + ultrasonicServoOffset);
-
-    // // int minIndex = getMin(&minDistance, sizeAngles);
-
-    // // minDistance = minDistances[minIndex];
-    // // minAngle = angles[minIndex];
-}
-
 void sendSerial()
 {
     Serial.print("Radio [0]: ");
@@ -380,7 +353,7 @@ void sendSerial()
 }
 
 /*
- * control by serial commands (mainly for debug)
+ * control car by serial commands (mainly for debug)
  * capital letter is for setting a property/variable
  * small letter is for getting a property/variable
  ********************************************************/
@@ -750,23 +723,6 @@ void ctrlCar1(byte dirServoDegree, bool motorDir, int motorSpd)
 
 void measureDistance()
 {
-    // unsigned long distanceTemp = sonarFront.ping_cm();
-    // if ((distanceTemp > 0) & (distanceTemp < MAX_DIST))
-    // {
-    // if (currentAngle < 80)
-    // {
-    //     minDistanceLeft = distanceTemp;
-    // }
-    // else if (currentAngle > 100)
-    // {
-    //     minDistanceRight = distanceTemp;
-    // }
-    // else
-    // {
-    //     distance = distanceTemp;
-    // }
-    // }
-
     unsigned long distanceTempLeft = sonarLeft.ping_cm();
     unsigned long distanceTempRight = sonarRight.ping_cm();
 
@@ -787,7 +743,7 @@ void measureDistance()
 
 void checkPIDCorrection()
 {
-    // check if aggressive of conservative PID parameters are necessary
+    // check if aggressive or conservative PID parameters are necessary
     double gapP1 = abs(directionServoSetpoint - 512);
     if (gapP1 < 100)
     { //we're close to setpoint, use conservative tuning parameters
