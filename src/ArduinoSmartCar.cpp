@@ -50,7 +50,7 @@ void serialControl();
 void measureDistance();
 void readLineFollowerSensor();
 
-void ctrlCar0(byte dirServoDegree, bool motorDir, int motorSpd); //manual mode
+void ctrlCar0(byte dirServoDegree, byte dirOffset, bool motorDir, int motorSpd); //manual mode
 void ctrlCar1(byte dirServoDegree, bool motorDir, int motorSpd); //automatic mode
 /*********************************************************/
 
@@ -68,7 +68,7 @@ Task tDrive(0, TASK_FOREVER, &handleManualMode, &taskManager, true);    // handl
 // sensor and calculations
 Task tDistance(updateInterval, TASK_FOREVER, &measureDistance, &taskManager, true);                        // ultrasonic distance sensor
 Task tLineFollowerSensor(updateInterval + 20, TASK_FOREVER, &readLineFollowerSensor, &taskManager, false); // line follower sensor
-// Task tPID
+// Task tPID(updateInterval, TASK_FOREVER, &xxx, &taskManager, true);                        // update PID calculation
 
 // communication
 Task tRF(0, TASK_FOREVER, &comRF, &taskManager, true);                                           // remote control
@@ -77,12 +77,10 @@ Task tSerialControl(updateIntervalSerial / 2, TASK_FOREVER, &serialControl, &tas
 /*********************************************************/
 
 /*
- * Drive modes and general variables
+ * Drive mode and general variables
  ********************************************************/
-#define debug 0;
-
+#define debug 0
 int mode = 1;
-int automatic = 0; // bool if in automatic mode (obsolete?)
 
 const int buzzerPin = 8; // define pin for buzzer
 /*********************************************************/
@@ -103,20 +101,30 @@ byte addresses[6] = "00007"; // define communication address which should corres
 // data[6] = data return channel to remote (left distance)
 // data[7] = data return channel to remote (right distance)
 // data[8] = data return channel to remote (speed)
-int data[9] = {512, 512, 1, 0, 1, 1, 512, 512, 512}; // define array used to save the communication data
+// int data[9] = {512, 512, 1, 0, 1, 1, 512, 512, 512}; // define array used to save the communication data
 
-// future structure
+// new structure
 // data[0] = mode (1 manual joystick, 2 manual gyroscope, 3 automatic ultrasonic sensors, 4 automatic line follower)
-// data[1] = direction X of joystick U1 (not assigned yet) (used as return channel for xy)
-// data[2] = direction Y of joystick U1 (front/back speed) (used as return channel for speed)
-// data[3] = fine tuning joystick U1 (used as return channel xy)
-// data[4] = direction X of joystick U2 (left/right) (used as return channel for direction)
-// data[5] = direction Y of joystick U2 (front buzzer, back not assigned yet) (used as return channel for xy)
-// data[6] = fine tuning joystick U2 (used as return channel for xy)
+// data[1] = direction X of joystick J1 (not assigned yet) (used as return channel for xy)
+// data[2] = direction Y of joystick J1 (front/back speed) (used as return channel for speed)
+// data[3] = fine tuning joystick J1 (used as return channel xy)
+// data[4] = direction X of joystick J2 (left/right) (used as return channel for direction)
+// data[5] = direction Y of joystick J2 (front buzzer, back not assigned yet) (used as return channel for xy)
+// data[6] = fine tuning joystick J2 (used as return channel for xy)
 // data[7] = data return channel to remote (used as return channel for left distance)
 // data[8] = data return channel to remote (used as return channel for right distance)
 // data[9] = data return channel to remote (used as return channel for line follower sensor value)
-// int data[9] = {1, 512, 512, 0, 512, 512, 0, 0, 0, 0}; // define array used to save the communication data
+#define apMode 0
+#define apJ1x 1
+#define apJ1ySpeed 2
+#define apJ1fine 3
+#define apJ2xDirection 4
+#define apJ2y 5
+#define apJ2fine 6
+#define apUL 7
+#define apUR 8
+#define apLFS 9
+int data[10] = {1, 512, 512, 0, 512, 512, 0, 0, 0, 0}; // define array used to save the communication data
 /*********************************************************/
 
 /*
@@ -216,56 +224,6 @@ const int GPin = A4;
 const int BPin = A5;
 /*********************************************************/
 
-void setup()
-{
-    Serial.begin(9600); // initialize serial port
-    delay(500);
-
-    radio.begin();                 // initialize RF24
-    radio.setRetries(0, 5);        // set retries times
-    radio.setPALevel(RF24_PA_LOW); // set power
-    // radio.openWritingPipe(addresses[1]);    // open delivery channel
-    // radio.openReadingPipe(1,addresses[0]);
-    radio.openReadingPipe(1, addresses); // open delivery channel
-    radio.startListening();              // start monitoring
-
-    directionServo.attach(directionServoPin); // attaches the servo on servoDirPin to the servo object
-    directionServo.write(directionServoDegree + directionServoOffset);
-
-    ultrasonicServo.attach(ultrasonicPin); // attaches the servo on ultrasonicPin to the servo object
-    ultrasonicServo.write(ultrasonicServoDegree + ultrasonicServoOffset);
-
-    pinMode(dirAPin, OUTPUT); // set dirAPin to output mode
-    pinMode(pwmAPin, OUTPUT); // set pwmAPin to output mode
-    pinMode(dirBPin, OUTPUT); // set dirBPin to output mode
-    pinMode(pwmBPin, OUTPUT); // set pwmBPin to output mode
-
-    pinMode(buzzerPin, OUTPUT); // set buzzerPin to output mode
-
-    pinMode(RPin, OUTPUT); // set RPin to output mode
-    pinMode(GPin, OUTPUT); // set GPin to output mode
-    pinMode(BPin, OUTPUT); // set BPin to output mode
-
-    analogWrite(GPin, 0);
-
-    // configure PID controller for autonomous mode
-    directionServoSetpoint = 512;
-    directionPID.SetOutputLimits(0, 1024);
-    directionPID.SetMode(AUTOMATIC);
-
-    // configure the line follower sensors
-    qtr.setTypeAnalog();
-    qtr.setSensorPins((const uint8_t[]){A8, A9, A10, A11, A12, A13, A14, A15}, SensorCount);
-    qtr.setEmitterPin(48);
-
-    Serial.println("Car booted");
-}
-
-void loop()
-{
-    taskManager.execute();
-}
-
 void calibrateLineFollowerSensor()
 {
     // analogRead() takes about 0.1 ms on an AVR.
@@ -328,28 +286,26 @@ void readLineFollowerSensor()
 
 void sendSerial()
 {
-    Serial.print("Radio [0]: ");
-    Serial.print(data[0]);
-    Serial.print("; [1]: ");
-    Serial.print(data[1]);
-    Serial.print("; [2]: ");
-    Serial.print(data[2]);
-    Serial.print("; [3]: ");
-    Serial.print(data[3]);
-    Serial.print("; [4]: ");
-    Serial.print(data[4]);
-    Serial.print("; [5]: ");
-    Serial.print(data[5]);
-    Serial.print("; [6]: ");
-    Serial.print(data[6]);
-    Serial.print("; [7]: ");
-    Serial.print(data[7]);
-    Serial.print("; [8]: ");
-    Serial.println(data[8]);
-
-    // Serial.print("Mode (RAW): " + String(mode));
-
-    // Serial.println("UltraSonicSensor: LastMeasuredAngle: " + String(currentAngle) + " - NextStep: " + String(nextStep) + " - Distance: " + String(distance) + " - MinDistance: " + String(minDistance) + " - MinAngle: " + String(minAngle));
+    Serial.print("Mode: ");
+    Serial.print(data[apMode]);
+    Serial.print("; J1x: ");
+    Serial.print(data[apJ1x]);
+    Serial.print("; J1ySpeed: ");
+    Serial.print(data[apJ1ySpeed]);
+    Serial.print("; J1fine: ");
+    Serial.print(data[apJ1fine]);
+    Serial.print("; J2xDirection: ");
+    Serial.print(data[apJ2xDirection]);
+    Serial.print("; J2y: ");
+    Serial.print(data[apJ2y]);
+    Serial.print("; J2fine: ");
+    Serial.print(data[apJ2fine]);
+    Serial.print("; UL: ");
+    Serial.print(data[apUL]);
+    Serial.print("; UR: ");
+    Serial.print(data[apUR]);
+    Serial.print("; LSF: ");
+    Serial.println(data[apLFS]);
 }
 
 /*
@@ -501,20 +457,20 @@ void handleManualMode()
     // map motorspeed as polynome to increase sensitivity at low speeds
     int speed = map(motorSpeed * motorSpeed, 0, 262144, 0, 255);
 
-    // lower limit is 90 to avoid buzzing of the motor, has to be adjusted for different drivers and motors
+    // lower limit is 90 to avoid buzzing of the motor (has to be adjusted for different drivers and motors)
     speed = max(speed, 90);
 
     // calculate the steering angle of servo according to the direction joystick of remote control and the deviation
     // #ToDo: polynome for increased sensitivity, see speed mapping
-    directionServoDegree = map(data[0], 0, 1023, 135, 45) - (data[3] - 512) / 25;
+    directionServoDegree = map(data[apJ2xDirection], 0, 1023, 135, 45) - (data[apJ2fine] - 512) / 25;
 
     // control the steering and travelling of the smart car
     if (motorDirection == FORWARD && (distanceLeft < 10 || distanceRight < 10))         // don't move if to close to obstacle
-        ctrlCar0(directionServoDegree, motorDirection, 0);
+        ctrlCar0(directionServoDegree, directionServoOffset, motorDirection, 0);
     else if (motorDirection == FORWARD && (distanceLeft < 30 || distanceRight < 30))    // move with minimum speed if still close
-        ctrlCar0(directionServoDegree, motorDirection, min(speed, 90));
+        ctrlCar0(directionServoDegree, directionServoOffset, motorDirection, min(speed, 90));
     else                                                                                // move full speed if no obstacle or reverse
-        ctrlCar0(directionServoDegree, motorDirection, speed);
+        ctrlCar0(directionServoDegree, directionServoOffset, motorDirection, speed);
 }
 
 void handleMode3()
@@ -528,21 +484,21 @@ void handleMode3()
     if (distanceLeft < 20 && distanceRight < 20)
     {
         if (distanceLeft < distanceRight)
-            ctrlCar0(135, BACKWARD, motorSpeed);
+            ctrlCar0(135, directionServoOffset, BACKWARD, motorSpeed);
         else
-            ctrlCar0(45, BACKWARD, motorSpeed);
+            ctrlCar0(45, directionServoOffset, BACKWARD, motorSpeed);
     }
     // if obstacle getting closer, turn to free direction
     else if (distanceLeft < 40 || distanceRight < 40)
     {
         if (distanceLeft > distanceRight)
-            ctrlCar0(120, FORWARD, motorSpeed);
+            ctrlCar0(120, directionServoOffset, FORWARD, motorSpeed);
         else
-            ctrlCar0(60, FORWARD, motorSpeed);
+            ctrlCar0(60, directionServoOffset, FORWARD, motorSpeed);
     }
     // if obstacle is far away go straight
     else {
-        ctrlCar0(90, FORWARD, 255);
+        ctrlCar0(90, directionServoOffset, FORWARD, 255);
     }
 }
 
@@ -620,14 +576,12 @@ void comRF()
         radio.read(data, sizeof(data)); // read data
     }
 
-    if (data[2])
+    if (data[apMode])
     {
         // read mode
-        mode = data[2];
+        mode = data[apMode];
 
-        
         // motorDirection = motorSpeed > 0 ? BACKWARD : FORWARD;
-
         // motorSpeed = constrain(motorSpeed, -511, 511);
         // motorSpeed = map(motorSpeed * motorSpeed, 0, 262144, 0, 255);
         // motorSpeed = map(motorSpeed, 0, 512, 0, 255);
@@ -642,7 +596,7 @@ void comRF()
         case 1: //manual
             tDrive.setCallback(&handleManualMode);
             // get the speed
-            motorSpeed = data[1] - 512;
+            motorSpeed = data[apJ1ySpeed] - 512;
 
             digitalWrite(RPin, LOW);
             digitalWrite(GPin, LOW);
@@ -651,7 +605,7 @@ void comRF()
         case 2: //manual
             tDrive.setCallback(&handleManualMode);
             // get the speed
-            motorSpeed = data[1] - 512;
+            motorSpeed = data[apJ1ySpeed] - 512;
 
             digitalWrite(RPin, LOW);
             digitalWrite(GPin, HIGH);
@@ -672,11 +626,9 @@ void comRF()
         default:
             break;
         }
-
-        automatic = mode > 3;
     }
 
-    if (data[5] < 100) // control the buzzer
+    if (data[apJ2y] < 100) // control the buzzer
     {
         // tone(buzzerPin, 330);
     }
@@ -686,26 +638,25 @@ void comRF()
     }
 }
 
-void ctrlCar0(byte dirServoDegree, bool motorDir, int motorSpd)
+void ctrlCar0(byte dirServoDegree, byte dirOffset, bool motorDir, int motorSpd)
 {
-    int trimDir = (data[7] - 512) / 25;
-    directionServo.write(dirServoDegree + directionServoOffset);
+    directionServo.write(dirServoDegree + dirOffset);
     digitalWrite(dirAPin, motorDir);
     digitalWrite(dirBPin, motorDir);
 
-    if ((dirServoDegree + trimDir) > 90)
+    if (dirServoDegree > 90)
     {                                                       // turning left
-        int redux = (dirServoDegree + trimDir - 90) * 0.35; // multiplier is a magic number
+        int redux = (dirServoDegree - 90) * 0.35; // multiplier is a magic number
         analogWrite(pwmAPin, motorSpd);
         analogWrite(pwmBPin, motorSpd * (45 - redux) / 45);
     }
-    if ((dirServoDegree + trimDir) < 90)
+    if (dirServoDegree < 90)
     {                                                       // turning right
-        int redux = (90 - trimDir - dirServoDegree) * 0.35; // multiplier is a magic number
+        int redux = (90 - dirServoDegree) * 0.35; // multiplier is a magic number
         analogWrite(pwmAPin, motorSpd * (45 - redux) / 45);
         analogWrite(pwmBPin, motorSpd);
     }
-    if ((dirServoDegree + trimDir) == 90)
+    if (dirServoDegree == 90)
     {
         analogWrite(pwmAPin, motorSpd);
         analogWrite(pwmBPin, motorSpd);
@@ -714,11 +665,11 @@ void ctrlCar0(byte dirServoDegree, bool motorDir, int motorSpd)
 
 void ctrlCar1(byte dirServoDegree, bool motorDir, int motorSpd)
 {
-    directionServo.write(dirServoDegree + directionServoOffset);
+    directionServo.write(dirServoDegree);
     digitalWrite(dirAPin, motorDir);
     digitalWrite(dirBPin, motorDir);
-    // analogWrite(pwmAPin, motorSpd);
-    // analogWrite(pwmBPin, motorSpd);
+    analogWrite(pwmAPin, motorSpd);
+    analogWrite(pwmBPin, motorSpd);
 }
 
 void measureDistance()
@@ -755,4 +706,54 @@ void checkPIDCorrection()
     }
     directionPID.Compute();
     // setPowerP1(BeakerOutputP1);
+}
+
+void setup()
+{
+    Serial.begin(9600); // initialize serial port
+    delay(500);
+
+    radio.begin();                 // initialize RF24
+    radio.setRetries(0, 5);        // set retries times
+    radio.setPALevel(RF24_PA_LOW); // set power
+    // radio.openWritingPipe(addresses[1]);    // open delivery channel
+    // radio.openReadingPipe(1,addresses[0]);
+    radio.openReadingPipe(1, addresses); // open delivery channel
+    radio.startListening();              // start monitoring
+
+    directionServo.attach(directionServoPin); // attaches the servo on servoDirPin to the servo object
+    directionServo.write(directionServoDegree + directionServoOffset);
+
+    ultrasonicServo.attach(ultrasonicPin); // attaches the servo on ultrasonicPin to the servo object
+    ultrasonicServo.write(ultrasonicServoDegree + ultrasonicServoOffset);
+
+    pinMode(dirAPin, OUTPUT); // set dirAPin to output mode
+    pinMode(pwmAPin, OUTPUT); // set pwmAPin to output mode
+    pinMode(dirBPin, OUTPUT); // set dirBPin to output mode
+    pinMode(pwmBPin, OUTPUT); // set pwmBPin to output mode
+
+    pinMode(buzzerPin, OUTPUT); // set buzzerPin to output mode
+
+    pinMode(RPin, OUTPUT); // set RPin to output mode
+    pinMode(GPin, OUTPUT); // set GPin to output mode
+    pinMode(BPin, OUTPUT); // set BPin to output mode
+
+    analogWrite(GPin, 0);
+
+    // configure PID controller for autonomous mode
+    directionServoSetpoint = 512;
+    directionPID.SetOutputLimits(0, 1024);
+    directionPID.SetMode(AUTOMATIC);
+
+    // configure the line follower sensors
+    qtr.setTypeAnalog();
+    qtr.setSensorPins((const uint8_t[]){A8, A9, A10, A11, A12, A13, A14, A15}, SensorCount);
+    qtr.setEmitterPin(48);
+
+    Serial.println("Car booted");
+}
+
+void loop()
+{
+    taskManager.execute();
 }
