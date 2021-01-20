@@ -140,6 +140,7 @@ bool bIsParameter;
  * Ultrasonic sensor
  ********************************************************/
 #define MAX_DIST 150           // define the range(cm) for ultrasonic ranging module, Maximum sensor distance is rated at 400-500cm.
+bool toggleSide = true;
 
 #define TRIG_PIN_L 15                                // define Trig pin for ultrasonic ranging module
 #define ECHO_PIN_L 14                                // define Echo pin for ultrasonic ranging module
@@ -270,6 +271,7 @@ void readLineFollowerSensor()
     // read calibrated sensor values and obtain a measure of the line position
     // from 0 to 5000 (for a white line, use readLineWhite() instead)
     lineFollowerPosition = qtr.readLineBlack(sensorValues);
+    data[apLFS] = lineFollowerPosition;
 
     directionServoSetpoint = map(lineFollowerPosition, 0, 5000, 1024, 0);
 
@@ -282,6 +284,51 @@ void readLineFollowerSensor()
     //     Serial.print('\t');
     // }
     Serial.println("Postition: " + lineFollowerPosition);
+}
+
+void measureDistance()
+{
+    // if (toggleSide)
+    // {
+        unsigned long distanceTempLeft = sonarLeft.ping_cm();
+        if ((distanceTempLeft > 0) & (distanceTempLeft < MAX_DIST))
+        {
+            distanceLeftLast = distanceLeft;
+            distanceLeft = distanceTempLeft;
+            data[apUL] = distanceLeft;
+
+            approachLeft = distanceLeftLast - distanceLeft - 0.2 > 0;
+        }
+    // }
+    // else
+    // {
+        unsigned long distanceTempRight = sonarRight.ping_cm();
+        if ((distanceTempRight > 0) & (distanceTempRight < MAX_DIST))
+        {
+            distanceRightLast = distanceRight;
+            distanceRight = distanceTempRight;
+            data[apUR] = distanceRight;
+
+            approachRight = distanceRightLast - distanceRight - 0.2 > 0;
+        }
+    // }
+    // toggleSide = !toggleSide;
+}
+
+void checkPIDCorrection()
+{
+    // check if aggressive or conservative PID parameters are necessary
+    double gapP1 = abs(directionServoSetpoint - 512);
+    if (gapP1 < 100)
+    { //we're close to setpoint, use conservative tuning parameters
+        directionPID.SetTunings(consKp, consKi, consKd);
+    }
+    else
+    { //we're far from setpoint, use aggressive tuning parameters
+        directionPID.SetTunings(aggKp, aggKi, aggKd);
+    }
+    directionPID.Compute();
+    // setPowerP1(BeakerOutputP1);
 }
 
 void sendSerial()
@@ -301,11 +348,11 @@ void sendSerial()
     Serial.print("; J2fine: ");
     Serial.print(data[apJ2fine]);
     Serial.print("; UL: ");
-    Serial.print(data[apUL]);
+    Serial.print(mode > 2 ? data[apUL] : distanceLeft);
     Serial.print("; UR: ");
-    Serial.print(data[apUR]);
+    Serial.print(mode > 2 ? data[apUR] : distanceRight);
     Serial.print("; LSF: ");
-    Serial.println(data[apLFS]);
+    Serial.println(mode > 2 ? data[apLFS] : lineFollowerPosition);
 }
 
 /*
@@ -339,9 +386,9 @@ void serialControl()
             case 'O': // set ultrasonicServoOffset
                 if (bIsParameter)
                 {
-                    if (iComandParamter >= -50 && iComandParamter <= 50)
+                    if (iComandParamter >= 0 && iComandParamter <= 90)
                     {
-                        ultrasonicServoOffset = iComandParamter;
+                        ultrasonicServoOffset = 45 - iComandParamter;
                     }
                 }
                 break;
@@ -457,9 +504,6 @@ void handleManualMode()
     // map motorspeed as polynome to increase sensitivity at low speeds
     int speed = map(motorSpeed * motorSpeed, 0, 262144, 0, 255);
 
-    // lower limit is 90 to avoid buzzing of the motor (has to be adjusted for different drivers and motors)
-    speed = max(speed, 90);
-
     // calculate the steering angle of servo according to the direction joystick of remote control and the deviation
     // #ToDo: polynome for increased sensitivity, see speed mapping
     directionServoDegree = map(data[apJ2xDirection], 0, 1023, 135, 45) - (data[apJ2fine] - 512) / 25;
@@ -476,30 +520,38 @@ void handleManualMode()
 void handleMode3()
 {
     // set the speed
-    motorSpeed = 120;
+    int speed = 255;
+    bool mDirection = FORWARD;
 
     // #ToDo: control steering angle based on approach velocity / probably also by PID
     // check distance of both sensors
-    // if obstacle is to close, move reverse direction 
+    // if obstacle is to close to avoid collision, move backwards 
     if (distanceLeft < 20 && distanceRight < 20)
     {
+        speed = 120;
+        mDirection = BACKWARD;
         if (distanceLeft < distanceRight)
-            ctrlCar0(135, directionServoOffset, BACKWARD, motorSpeed);
+            directionServoDegree = 135;
         else
-            ctrlCar0(45, directionServoOffset, BACKWARD, motorSpeed);
+            directionServoDegree = 45;
     }
-    // if obstacle getting closer, turn to free direction
+    // if obstacle getting closer, turn to (more) free direction
     else if (distanceLeft < 40 || distanceRight < 40)
     {
-        if (distanceLeft > distanceRight)
-            ctrlCar0(120, directionServoOffset, FORWARD, motorSpeed);
+        speed = 120;
+        if (distanceLeft < distanceRight)
+            directionServoDegree = 135;
         else
-            ctrlCar0(60, directionServoOffset, FORWARD, motorSpeed);
+            directionServoDegree = 45;
     }
     // if obstacle is far away go straight
     else {
-        ctrlCar0(90, directionServoOffset, FORWARD, 255);
+        directionServoDegree = 90;
     }
+
+    data[apJ1ySpeed] = map(mDirection ? speed : -speed, -255, 255, 0, 1023);
+    data[apJ2xDirection] = map(directionServoDegree, 135, 45, 0, 1023);
+    ctrlCar0(directionServoDegree, directionServoOffset, FORWARD, 255);
 }
 
 void handleMode4()
@@ -588,7 +640,7 @@ void comRF()
 
         switch (mode)
         {
-        case 0: //unknown
+        case 0: //serial control
             digitalWrite(RPin, HIGH);
             digitalWrite(GPin, HIGH);
             digitalWrite(BPin, HIGH);
@@ -612,12 +664,15 @@ void comRF()
             digitalWrite(BPin, HIGH);
             break;
         case 3:
+            data[apJ1ySpeed] = motorSpeed;
+            data[apJ2xDirection] = motorSpeed;
             tDrive.setCallback(&handleMode3);
             digitalWrite(RPin, HIGH);
             digitalWrite(GPin, LOW);
             digitalWrite(BPin, HIGH);
             break;
         case 4:
+            data[apJ1ySpeed] = motorSpeed;
             tDrive.setCallback(&handleMode4);
             digitalWrite(RPin, HIGH);
             digitalWrite(GPin, HIGH);
@@ -670,42 +725,6 @@ void ctrlCar1(byte dirServoDegree, bool motorDir, int motorSpd)
     digitalWrite(dirBPin, motorDir);
     analogWrite(pwmAPin, motorSpd);
     analogWrite(pwmBPin, motorSpd);
-}
-
-void measureDistance()
-{
-    unsigned long distanceTempLeft = sonarLeft.ping_cm();
-    unsigned long distanceTempRight = sonarRight.ping_cm();
-
-    if ((distanceTempLeft > 0) & (distanceTempLeft < MAX_DIST))
-    {
-        distanceLeftLast = distanceLeft;
-        distanceLeft = distanceTempLeft;
-        approachLeft = distanceLeftLast - distanceLeft - 0.2 > 0;
-    }
-
-    if ((distanceTempRight > 0) & (distanceTempRight < MAX_DIST))
-    {
-        distanceRightLast = distanceRight;
-        distanceRight = distanceTempRight;
-        approachRight = distanceRightLast - distanceRight - 0.2 > 0;
-    }
-}
-
-void checkPIDCorrection()
-{
-    // check if aggressive or conservative PID parameters are necessary
-    double gapP1 = abs(directionServoSetpoint - 512);
-    if (gapP1 < 100)
-    { //we're close to setpoint, use conservative tuning parameters
-        directionPID.SetTunings(consKp, consKi, consKd);
-    }
-    else
-    { //we're far from setpoint, use aggressive tuning parameters
-        directionPID.SetTunings(aggKp, aggKi, aggKd);
-    }
-    directionPID.Compute();
-    // setPowerP1(BeakerOutputP1);
 }
 
 void setup()
