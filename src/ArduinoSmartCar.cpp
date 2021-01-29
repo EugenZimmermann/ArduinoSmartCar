@@ -91,18 +91,6 @@ const int buzzerPin = 8; // define pin for buzzer
 RF24 radio(9, 53);           // define the object to control NRF24L01
 byte addresses[6] = "00007"; // define communication address which should correspond to remote control
 
-// old structure
-// data[0] = direction Y of joystick U1 (front/back speed) (used as return channel)
-// data[1] = direction X of joystick U2 (left/right)
-// data[2] = mode (1 manual, 2 xxx, 3 manuel with gyroscope, 4 automatic)
-// data[3] = fine tuning joystick U1
-// data[4] = fine tuning joystick U2
-// data[5] = direction Y of joystick U2 (servo of distance sensor)
-// data[6] = data return channel to remote (left distance)
-// data[7] = data return channel to remote (right distance)
-// data[8] = data return channel to remote (speed)
-// int data[9] = {512, 512, 1, 0, 1, 1, 512, 512, 512}; // define array used to save the communication data
-
 // new structure
 // data[0] = mode (1 manual joystick, 2 manual gyroscope, 3 automatic ultrasonic sensors, 4 automatic line follower)
 // data[1] = direction X of joystick J1 (not assigned yet) (used as return channel for xy)
@@ -499,14 +487,14 @@ void handleManualMode()
 
     // check forward or backward
     motorDirection = motorSpeed > 0 ? BACKWARD : FORWARD;
-    motorSpeed = constrain(motorSpeed, -511, 511);
+    long motorSpeedSquare = constrain(motorSpeed * motorSpeed, 0, 262144);
 
     // map motorspeed as polynome to increase sensitivity at low speeds
-    int speed = map(motorSpeed * motorSpeed, 0, 262144, 0, 255);
+    int speed = map(motorSpeedSquare, 0, 262144, 0, 255);
 
     // calculate the steering angle of servo according to the direction joystick of remote control and the deviation
     // #ToDo: polynome for increased sensitivity, see speed mapping
-    directionServoDegree = map(data[apJ2xDirection], 0, 1023, 135, 45) - (data[apJ2fine] - 512) / 25;
+    directionServoDegree = map(data[apJ2xDirection], 0, 1023, 135, 45) - (data[apJ2fine] - 511) / 25;
 
     // control the steering and travelling of the smart car
     if (motorDirection == FORWARD && (distanceLeft < 10 || distanceRight < 10))         // don't move if to close to obstacle
@@ -526,7 +514,7 @@ void handleMode3()
     // #ToDo: control steering angle based on approach velocity / probably also by PID
     // check distance of both sensors
     // if obstacle is to close to avoid collision, move backwards 
-    if (distanceLeft < 20 && distanceRight < 20)
+    if (distanceLeft < 20 || distanceRight < 20)
     {
         speed = 120;
         mDirection = BACKWARD;
@@ -641,6 +629,10 @@ void comRF()
         switch (mode)
         {
         case 0: //serial control
+            tDrive.setCallback(&handleManualMode);
+            // get the speed
+            motorSpeed = data[apJ1ySpeed] - 512;
+            
             digitalWrite(RPin, HIGH);
             digitalWrite(GPin, HIGH);
             digitalWrite(BPin, HIGH);
