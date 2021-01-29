@@ -13,23 +13,25 @@ This is a work in progress for a smart car based on the Adeept Remote Control Sm
 
 ## Control modes:
 The car allows to be operated in 4 modes:
-Mode 1: Remote control mode with joysticks.
-Mode 2: Remote control with tilt sensor.
-Mode 3: Autonomic mode using the ultrasonic distance sensor(s).
-Mode 4: Autonomic line following mode.
+* Mode 1: Remote control mode with joysticks.
+* Mode 2: Remote control with gyroscope sensor.
+* Mode 3: Autonomic mode using the ultrasonic distance sensor(s).
+* Mode 4: Autonomic line following mode.
 
+
+## Mode completition:
+* (x) Mode 1 implemented.
+  * ( ) Bug: Wheels are not spinning at full speed. Calculation error.
+* ( ) Mode 2 implemented.
+* ( ) Mode 3 implemented.
+* ( ) Mode 4 implemented.
 
 ## Planned features:
-Features completed:
-( ) Mode 1 implemented.
-( ) Mode 2 implemented.
-( ) Mode 3 implemented.
-( ) Mode 4 implemented.
-
-( ) All modes should take use of the ultrasonic distance sensor to prevent collision.
-( ) PID correction of direction.
-( ) Red break lights.
-( ) Orange turn lights.
+* ( ) All modes should take use of the ultrasonic distance sensor to prevent collision.
+* ( ) PID correction of direction.
+* ( ) Hardware: Optimize angle of ultrasonic sensors
+* ( ) Hardware: Red break lights.
+* ( ) Hardware: Orange turn lights.
 
 ##
 Author: Eugen Zimmermann
