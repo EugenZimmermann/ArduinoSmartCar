@@ -50,8 +50,8 @@ void serialControl();
 void measureDistance();
 void readLineFollowerSensor();
 
-void ctrlCar0(byte dirServoDegree, byte dirOffset, bool motorDir, int motorSpd); //manual mode
-void ctrlCar1(byte dirServoDegree, bool motorDir, int motorSpd); //automatic mode
+void ctrlCar0(int dirServoDegree, int dirOffset, bool motorDir, int motorSpd); //manual mode
+void ctrlCar1(int dirServoDegree, bool motorDir, int motorSpd); //automatic mode
 /*********************************************************/
 
 /*
@@ -112,7 +112,7 @@ byte addresses[6] = "00007"; // define communication address which should corres
 #define apUL 7
 #define apUR 8
 #define apLFS 9
-int data[10] = {1, 512, 512, 0, 512, 512, 0, 0, 0, 0}; // define array used to save the communication data
+int data[10] = {1, 512, 512, 512, 512, 512, 512, 0, 0, 0}; // define array used to save the communication data
 /*********************************************************/
 
 /*
@@ -178,12 +178,12 @@ PID directionPID(&directionMissmatch, &directionCorrection, &directionServoSetpo
  ********************************************************/
 Servo directionServo;            // define servo to control turning of smart car
 const int directionServoPin = 2; // define pin for signal line of the last servo
-int directionServoDegree = 78;   //default: 78
-int directionServoOffset = 0;    // define a variable for deviation(degree) of the servo
+int directionServoDegree = 90;   //default: 78
+int directionServoOffset = -10;    // define a variable for deviation(degree) of the servo
 
 Servo ultrasonicServo; // define servo to control turning of ultrasonic sensor
 int ultrasonicPin = 3; // define pin for signal line of the last servo
-int ultrasonicServoDegree = 78;
+int ultrasonicServoDegree = 90;
 int ultrasonicServoOffset = 0; // define a variable for deviation(degree) of the servo
 /*********************************************************/
 
@@ -392,15 +392,10 @@ void serialControl()
             case 'M': // set new mode
                 if (bIsParameter)
                 {
-                    switch (iComandParamter)
+                    if (iComandParamter < 5)
                     {
-                    case 0:
-                    case 1:
                         mode = iComandParamter;
                         Serial.println("Mode: " + String(mode));
-                        // radio.stopListening();
-                        // radio.write(mode, sizeof(mode));
-                        // radio.startListening();
                     }
                 }
                 break;
@@ -486,11 +481,12 @@ void handleManualMode()
     // motorSpeed = data[1] - 512; // is read in comRF for manual mode
 
     // check forward or backward
-    motorDirection = motorSpeed > 0 ? BACKWARD : FORWARD;
-    long motorSpeedSquare = constrain(motorSpeed * motorSpeed, 0, 262144);
+    motorDirection = motorSpeed < 0 ? BACKWARD : FORWARD;
+    unsigned long motorSpeedSquare = (long)motorSpeed * (long)motorSpeed;
 
     // map motorspeed as polynome to increase sensitivity at low speeds
-    int speed = map(motorSpeedSquare, 0, 262144, 0, 255);
+    int speed = constrain(map(motorSpeedSquare, 0, 260000, 0, 255), 0, 255);
+    // Serial.println(String(motorSpeed) + " - " + String(motorSpeedSquare) + " - " + String(speed));
 
     // calculate the steering angle of servo according to the direction joystick of remote control and the deviation
     // #ToDo: polynome for increased sensitivity, see speed mapping
@@ -631,7 +627,7 @@ void comRF()
         case 0: //serial control
             tDrive.setCallback(&handleManualMode);
             // get the speed
-            motorSpeed = data[apJ1ySpeed] - 512;
+            motorSpeed = data[apJ1ySpeed] - 511;
             
             digitalWrite(RPin, HIGH);
             digitalWrite(GPin, HIGH);
@@ -640,7 +636,7 @@ void comRF()
         case 1: //manual
             tDrive.setCallback(&handleManualMode);
             // get the speed
-            motorSpeed = data[apJ1ySpeed] - 512;
+            motorSpeed = data[apJ1ySpeed] - 511;
 
             digitalWrite(RPin, LOW);
             digitalWrite(GPin, LOW);
@@ -649,7 +645,7 @@ void comRF()
         case 2: //manual
             tDrive.setCallback(&handleManualMode);
             // get the speed
-            motorSpeed = data[apJ1ySpeed] - 512;
+            motorSpeed = data[apJ1ySpeed] - 511;
 
             digitalWrite(RPin, LOW);
             digitalWrite(GPin, HIGH);
@@ -675,7 +671,7 @@ void comRF()
         }
     }
 
-    if (data[apJ2y] < 100) // control the buzzer
+    if (data[apJ2y] > 1000) // control the buzzer
     {
         // tone(buzzerPin, 330);
     }
@@ -685,7 +681,7 @@ void comRF()
     }
 }
 
-void ctrlCar0(byte dirServoDegree, byte dirOffset, bool motorDir, int motorSpd)
+void ctrlCar0(int dirServoDegree, int dirOffset, bool motorDir, int motorSpd)
 {
     directionServo.write(dirServoDegree + dirOffset);
     digitalWrite(dirAPin, motorDir);
@@ -710,7 +706,7 @@ void ctrlCar0(byte dirServoDegree, byte dirOffset, bool motorDir, int motorSpd)
     }
 }
 
-void ctrlCar1(byte dirServoDegree, bool motorDir, int motorSpd)
+void ctrlCar1(int dirServoDegree, bool motorDir, int motorSpd)
 {
     directionServo.write(dirServoDegree);
     digitalWrite(dirAPin, motorDir);
